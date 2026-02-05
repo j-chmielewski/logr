@@ -11,9 +11,11 @@ use ratatui::{
     Frame, Terminal,
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
-    style::{Color, Stylize},
+    style::{Color, Style, Stylize},
+    text::{Line, Span},
     widgets::{Block, Cell, Row, Table},
 };
+use regex::Regex;
 use std::{
     error::Error,
     io::{self, BufRead},
@@ -52,6 +54,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn ui(f: &mut Frame, lines: &Vec<String>) {
+    let re_red = Regex::new(r"legion").unwrap();
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(1)
@@ -59,15 +62,61 @@ fn ui(f: &mut Frame, lines: &Vec<String>) {
         .split(f.area());
 
     let rows = lines.iter().map(|line| {
-        let cells = vec![Cell::from(line.clone().fg(Color::Green))];
-        Row::new(cells).height(1)
+        let caps = re_red.captures(line);
+        if let Some(caps) = caps {
+            let mut i = 0;
+            let mut spans = Vec::new();
+            for cap in caps.iter() {
+                let Some(cap) = cap else {
+                    continue;
+                };
+                spans.push(Span::styled(
+                    line[i..cap.start()].to_string(),
+                    Style::default(),
+                ));
+                spans.push(Span::styled(
+                    line[cap.start()..cap.end()].to_string(),
+                    Style::default().fg(Color::Red),
+                ));
+                i = usize::min(cap.end(), line.len() - 1);
+            }
+            spans.push(Span::styled(
+                line[i..].to_string(),
+                Style::default(),
+            ));
+            let cells = vec![Cell::from(Line::from(spans))];
+            Row::new(cells).height(1)
+        } else {
+            Row::new(vec![Cell::from(Line::from(line.clone().fg(Color::White)))])
+        }
+        // let colored = String::new();
+        // for cap in caps {}
+        // // let colored_line = Line::from format!("{} {}", "DUPA".fg(Color::Red), line);
+        // // let colored_line = "dupa".fg(Color::Red);
+        // // let cells = vec![Cell::from(line.clone().fg(Color::Green))];
+        // // let cells = vec![Cell::from(colored_line)];
+
+        // let cells = vec![Cell::from(Line::from(vec![
+        //     Span::styled("DUPA ", Style::default().fg(Color::Red)),
+        //     Span::styled(line, Style::default().fg(Color::Green)),
+        // ]))];
+        // Row::new(cells).height(1)
     });
 
-    let widths = [
-        Constraint::Percentage(100),
-    ];
+    let widths = [Constraint::Percentage(100)];
 
     let table = Table::new(rows, widths).block(Block::default());
 
     f.render_widget(table, chunks[0]);
+}
+
+fn main_1() {
+    let msg = "Ala ma kota".fg(Color::Green);
+    println!("{msg}");
+    let re = Regex::new(r"test").unwrap();
+    let haystack = "ala ma test kota";
+    let caps = re.captures(haystack).unwrap();
+    for cap in caps.iter() {
+        // println!("Cap: {cap:?}".fg(Color::Green));
+    }
 }
