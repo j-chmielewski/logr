@@ -13,7 +13,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Style, Stylize},
     text::{Line, Span},
-    widgets::{Block, Cell, Paragraph, Row, Table},
+    widgets::{Block, Borders, Cell, Paragraph, Row, Table},
 };
 use regex::Regex;
 use std::{
@@ -57,7 +57,7 @@ fn ui(f: &mut Frame, lines: &Vec<String>) {
     let re_red = Regex::new(r"legion").unwrap();
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .margin(1)
+        .margin(0)
         .constraints([Constraint::Percentage(100)])
         .split(f.area());
 
@@ -80,10 +80,7 @@ fn ui(f: &mut Frame, lines: &Vec<String>) {
                 ));
                 i = usize::min(cap.end(), line.len() - 1);
             }
-            spans.push(Span::styled(
-                line[i..].to_string(),
-                Style::default(),
-            ));
+            spans.push(Span::styled(line[i..].to_string(), Style::default()));
             // let cells = vec![Cell::from(Line::from(spans))];
             // Row::new(cells).height(1)
             Line::from(spans)
@@ -96,7 +93,9 @@ fn ui(f: &mut Frame, lines: &Vec<String>) {
     let widths = [Constraint::Percentage(100)];
 
     // let table = Table::new(rows, widths).block(Block::default());
-    let table = Paragraph::new(rows.collect::<Vec<_>>()).block(Block::default());
+    let table = Paragraph::new(rows.collect::<Vec<_>>())
+        .block(Block::default())
+        .block(Block::new().borders(Borders::all()));
 
     f.render_widget(table, chunks[0]);
 }
