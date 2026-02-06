@@ -13,7 +13,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Style, Stylize},
     text::{Line, Span},
-    widgets::{Block, Cell, Row, Table},
+    widgets::{Block, Cell, Paragraph, Row, Table},
 };
 use regex::Regex;
 use std::{
@@ -84,39 +84,19 @@ fn ui(f: &mut Frame, lines: &Vec<String>) {
                 line[i..].to_string(),
                 Style::default(),
             ));
-            let cells = vec![Cell::from(Line::from(spans))];
-            Row::new(cells).height(1)
+            // let cells = vec![Cell::from(Line::from(spans))];
+            // Row::new(cells).height(1)
+            Line::from(spans)
         } else {
-            Row::new(vec![Cell::from(Line::from(line.clone().fg(Color::White)))])
+            // Row::new(vec![Cell::from(Line::from(line.clone().fg(Color::White)))])
+            Line::from(line.clone().fg(Color::White))
         }
-        // let colored = String::new();
-        // for cap in caps {}
-        // // let colored_line = Line::from format!("{} {}", "DUPA".fg(Color::Red), line);
-        // // let colored_line = "dupa".fg(Color::Red);
-        // // let cells = vec![Cell::from(line.clone().fg(Color::Green))];
-        // // let cells = vec![Cell::from(colored_line)];
-
-        // let cells = vec![Cell::from(Line::from(vec![
-        //     Span::styled("DUPA ", Style::default().fg(Color::Red)),
-        //     Span::styled(line, Style::default().fg(Color::Green)),
-        // ]))];
-        // Row::new(cells).height(1)
     });
 
     let widths = [Constraint::Percentage(100)];
 
-    let table = Table::new(rows, widths).block(Block::default());
+    // let table = Table::new(rows, widths).block(Block::default());
+    let table = Paragraph::new(rows.collect::<Vec<_>>()).block(Block::default());
 
     f.render_widget(table, chunks[0]);
-}
-
-fn main_1() {
-    let msg = "Ala ma kota".fg(Color::Green);
-    println!("{msg}");
-    let re = Regex::new(r"test").unwrap();
-    let haystack = "ala ma test kota";
-    let caps = re.captures(haystack).unwrap();
-    for cap in caps.iter() {
-        // println!("Cap: {cap:?}".fg(Color::Green));
-    }
 }
