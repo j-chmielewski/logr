@@ -1,7 +1,7 @@
 use clap::{ArgAction, Parser};
 use color_eyre::Result;
 use crossterm::{
-    event::{DisableMouseCapture, EnableMouseCapture},
+    event::{DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, poll, read},
     execute,
     terminal::{
         Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
@@ -19,7 +19,13 @@ use ratatui::{
 use regex::{Regex, RegexBuilder};
 use std::{
     error::Error,
-    io::{self, BufRead},
+    io,
+    sync::atomic::{AtomicBool, Ordering},
+    time::Duration,
+};
+use tokio::{
+    io::{AsyncBufReadExt, BufReader},
+    signal,
 };
 
 #[derive(Parser, Debug)]
@@ -32,9 +38,36 @@ struct Args {
     ignore_case: bool,
 }
 
+static SHOULD_EXIT: AtomicBool = AtomicBool::new(false);
+
+async fn setup_signal_handlers() {
+    tokio::spawn(async move {
+        signal::ctrl_c().await.expect("Failed to listen for ctrl-c");
+        SHOULD_EXIT.store(true, Ordering::SeqCst);
+    });
+}
+
+async fn check_exit() -> bool {
+    if SHOULD_EXIT.load(Ordering::SeqCst) {
+        return true;
+    }
+
+    if poll(Duration::from_millis(0)).unwrap_or(false) {
+        if let Ok(Event::Key(KeyEvent { code, .. })) = read() {
+            if code == KeyCode::Char('q') {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
+
+    setup_signal_handlers().await;
 
     let re = RegexBuilder::new(&args.pattern)
         .case_insensitive(args.ignore_case)
@@ -51,13 +84,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
     )?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
-    let stdin = io::stdin();
+    let stdin = BufReader::new(tokio::io::stdin());
     let mut lines = Vec::new();
+    let mut lines_stream = stdin.lines();
 
-    for line in stdin.lock().lines() {
-        let line = line.expect("Could not read line from standard in");
+    while let Some(line) = lines_stream.next_line().await? {
+        if check_exit().await {
+            break;
+        }
+
         lines.push(line);
         terminal.draw(|f| ui(f, &lines, &re))?;
+
+        if check_exit().await {
+            break;
+        }
     }
 
     disable_raw_mode()?;
