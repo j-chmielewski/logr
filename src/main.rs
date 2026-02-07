@@ -25,7 +25,8 @@ use std::{
 };
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
-    signal, time::timeout,
+    signal,
+    time::timeout,
 };
 
 #[derive(Parser, Debug)]
@@ -93,21 +94,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
             break;
         }
 
-        let line = timeout(Duration::from_millis(100), lines_stream.next_line()).await;
-
-        if check_exit().await {
-            break;
-        }
-
-        match line {
-            Ok(Ok(Some(l))) => {
-                lines.push(l);
-                terminal.draw(|f| ui(f, &lines, &re))?;
-            }
-            Ok(Ok(None)) | Err(_) => {
-                terminal.draw(|f| ui(f, &lines, &re))?;
-            }
-            _ => {}
+        if let Ok(Ok(Some(line))) =
+            timeout(Duration::from_millis(100), lines_stream.next_line()).await
+        {
+            lines.push(line);
+            terminal.draw(|f| ui(f, &lines, &re))?;
         }
     }
 
