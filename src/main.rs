@@ -1,3 +1,4 @@
+use clap::{ArgAction, Parser};
 use color_eyre::Result;
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture},
@@ -13,16 +14,33 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Style, Stylize},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, Paragraph, Row, Table},
+    widgets::{Block, Borders, Paragraph},
 };
-use regex::Regex;
+use regex::{Regex, RegexBuilder};
 use std::{
     error::Error,
     io::{self, BufRead},
 };
 
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    #[arg(short, long)]
+    pattern: String,
+
+    #[arg(short, long, action = ArgAction::SetTrue)]
+    ignore_case: bool,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    let args = Args::parse();
+
+    let re = RegexBuilder::new(&args.pattern)
+        .case_insensitive(args.ignore_case)
+        .build()
+        .expect("Invalid regex pattern");
+
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(
@@ -39,7 +57,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     for line in stdin.lock().lines() {
         let line = line.expect("Could not read line from standard in");
         lines.push(line);
-        terminal.draw(|f| ui(f, &lines))?;
+        terminal.draw(|f| ui(f, &lines, &re))?;
     }
 
     disable_raw_mode()?;
@@ -53,8 +71,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn ui(f: &mut Frame, lines: &Vec<String>) {
-    let re_red = Regex::new(r"legion").unwrap();
+fn ui(f: &mut Frame, lines: &Vec<String>, re: &Regex) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(0)
@@ -62,7 +79,7 @@ fn ui(f: &mut Frame, lines: &Vec<String>) {
         .split(f.area());
 
     let rows = lines.iter().map(|line| {
-        let caps = re_red.captures(line);
+        let caps = re.captures(line);
         if let Some(caps) = caps {
             let mut i = 0;
             let mut spans = Vec::new();
@@ -81,18 +98,12 @@ fn ui(f: &mut Frame, lines: &Vec<String>) {
                 i = usize::min(cap.end(), line.len() - 1);
             }
             spans.push(Span::styled(line[i..].to_string(), Style::default()));
-            // let cells = vec![Cell::from(Line::from(spans))];
-            // Row::new(cells).height(1)
             Line::from(spans)
         } else {
-            // Row::new(vec![Cell::from(Line::from(line.clone().fg(Color::White)))])
             Line::from(line.clone().fg(Color::White))
         }
     });
 
-    let widths = [Constraint::Percentage(100)];
-
-    // let table = Table::new(rows, widths).block(Block::default());
     let table = Paragraph::new(rows.collect::<Vec<_>>())
         .block(Block::default())
         .block(Block::new().borders(Borders::all()));
