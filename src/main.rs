@@ -5,17 +5,17 @@ use crossterm::{
     },
     execute,
     terminal::{
-        Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
+        Clear as TermClear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
         enable_raw_mode,
     },
 };
 use ratatui::{
     Frame, Terminal,
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style, Stylize},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Clear, Paragraph},
 };
 use regex::{Regex, RegexBuilder};
 use std::{
@@ -46,6 +46,15 @@ enum LogrError {
     RegexError(#[from] regex::Error),
 }
 
+struct AppState {
+    patterns: Vec<String>,
+    dialog_open: bool,
+    input: String,
+    pattern_error: Option<String>,
+    regexes: Vec<Regex>,
+    ignore_case: bool,
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
@@ -53,9 +62,15 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn run(args: Args) -> Result<(), LogrError> {
-    let re = RegexBuilder::new(&args.pattern)
-        .case_insensitive(args.ignore_case)
-        .build()?;
+    let regex = build_regex(&args.pattern, args.ignore_case)?;
+    let mut app = AppState {
+        patterns: vec![args.pattern],
+        dialog_open: false,
+        input: String::new(),
+        pattern_error: None,
+        regexes: vec![regex],
+        ignore_case: args.ignore_case,
+    };
 
     let mut terminal = term_init()?;
     let stdin = BufReader::new(tokio::io::stdin());
@@ -63,15 +78,21 @@ async fn run(args: Args) -> Result<(), LogrError> {
     let mut lines = Vec::new();
 
     loop {
-        if should_exit().await {
+        let event_result = handle_event(&mut app)?;
+        if event_result.exit {
             break;
         }
 
+        let mut should_draw = event_result.redraw || app.dialog_open;
         if let Ok(Ok(Some(line))) =
             timeout(Duration::from_millis(100), lines_stream.next_line()).await
         {
             lines.push(line);
-            terminal.draw(|f| ui(f, &lines, &re))?;
+            should_draw = true;
+        }
+
+        if should_draw {
+            terminal.draw(|f| ui(f, &lines, &app))?;
         }
     }
 
@@ -87,7 +108,7 @@ fn term_init() -> Result<LogrTerminal, io::Error> {
     execute!(
         stdout,
         EnterAlternateScreen,
-        Clear(ClearType::All),
+        TermClear(ClearType::All),
         EnableMouseCapture
     )?;
     let backend = CrosstermBackend::new(stdout);
@@ -104,24 +125,94 @@ fn term_deinit(mut terminal: LogrTerminal) -> Result<(), io::Error> {
     terminal.show_cursor()
 }
 
-async fn should_exit() -> bool {
+fn build_regex(pattern: &str, ignore_case: bool) -> Result<Regex, regex::Error> {
+    RegexBuilder::new(pattern)
+        .case_insensitive(ignore_case)
+        .build()
+}
+
+struct EventResult {
+    exit: bool,
+    redraw: bool,
+}
+
+fn handle_event(app: &mut AppState) -> Result<EventResult, LogrError> {
     if crossterm::event::poll(Duration::from_millis(0)).unwrap_or(false) {
         if let Ok(Event::Key(KeyEvent {
             code, modifiers, ..
         })) = read()
         {
-            if code == KeyCode::Char('q')
-                || (code == KeyCode::Char('c') && modifiers.contains(KeyModifiers::CONTROL))
-            {
-                return true;
+            let redraw = true;
+            if !app.dialog_open {
+                match code {
+                    KeyCode::Char('q') => return Ok(EventResult { exit: true, redraw }),
+                    KeyCode::Char('p') => {
+                        app.dialog_open = true;
+                        app.input.clear();
+                        app.pattern_error = None;
+                    }
+                    KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
+                        return Ok(EventResult { exit: true, redraw })
+                    }
+                    _ => {}
+                }
+            } else {
+                match code {
+                    KeyCode::Esc => {
+                        app.dialog_open = false;
+                        app.input.clear();
+                        app.pattern_error = None;
+                    }
+                    KeyCode::Char('q') => return Ok(EventResult { exit: true, redraw }),
+                    KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
+                        return Ok(EventResult { exit: true, redraw })
+                    }
+                    KeyCode::Enter => {
+                        if app.input.trim().is_empty() {
+                            app.dialog_open = false;
+                            app.pattern_error = None;
+                        } else {
+                            match build_regex(&app.input, app.ignore_case) {
+                                Ok(regex) => {
+                                    app.patterns.push(app.input.clone());
+                                    app.regexes.push(regex);
+                                    app.dialog_open = false;
+                                    app.input.clear();
+                                    app.pattern_error = None;
+                                }
+                                Err(err) => {
+                                    app.pattern_error =
+                                        Some(format!("Invalid pattern: {err}"));
+                                }
+                            }
+                        }
+                    }
+                    KeyCode::Backspace => {
+                        app.input.pop();
+                    }
+                    KeyCode::Char(c) => {
+                        if !modifiers.contains(KeyModifiers::CONTROL) {
+                            app.input.push(c);
+                        }
+                    }
+                    _ => {}
+                }
             }
+
+            return Ok(EventResult {
+                exit: false,
+                redraw,
+            });
         }
     }
 
-    false
+    Ok(EventResult {
+        exit: false,
+        redraw: false,
+    })
 }
 
-fn ui(f: &mut Frame, lines: &Vec<String>, re: &Regex) {
+fn ui(f: &mut Frame, lines: &Vec<String>, app: &AppState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(0)
@@ -129,29 +220,7 @@ fn ui(f: &mut Frame, lines: &Vec<String>, re: &Regex) {
         .split(f.area());
 
     let rows = lines.iter().map(|line| {
-        let caps = re.captures(line);
-        if let Some(caps) = caps {
-            let mut i = 0;
-            let mut spans = Vec::new();
-            for cap in caps.iter() {
-                let Some(cap) = cap else {
-                    continue;
-                };
-                spans.push(Span::styled(
-                    line[i..cap.start()].to_string(),
-                    Style::default(),
-                ));
-                spans.push(Span::styled(
-                    line[cap.start()..cap.end()].to_string(),
-                    Style::default().fg(Color::Red),
-                ));
-                i = usize::min(cap.end(), line.len() - 1);
-            }
-            spans.push(Span::styled(line[i..].to_string(), Style::default()));
-            Line::from(spans)
-        } else {
-            Line::from(line.clone().fg(Color::White))
-        }
+        highlight_line(line, &app.regexes)
     });
 
     let table = Paragraph::new(rows.collect::<Vec<_>>())
@@ -159,4 +228,113 @@ fn ui(f: &mut Frame, lines: &Vec<String>, re: &Regex) {
         .block(Block::new().borders(Borders::all()));
 
     f.render_widget(table, chunks[0]);
+
+    if app.dialog_open {
+        let area = centered_rect(80, 60, f.area());
+        f.render_widget(Clear, area);
+        let mut dialog_lines = Vec::new();
+
+        for pattern in &app.patterns {
+            dialog_lines.push(Line::from(Span::styled(
+                format!("  {pattern}"),
+                Style::default().fg(Color::Green),
+            )));
+        }
+
+        if let Some(err) = &app.pattern_error {
+            dialog_lines.push(Line::from(Span::styled(
+                err.clone(),
+                Style::default().fg(Color::Red),
+            )));
+        }
+
+        let input_style = Style::default().fg(Color::Cyan);
+        dialog_lines.push(Line::from(Span::styled(
+            format!("> + {}", app.input),
+            input_style,
+        )));
+
+        let dialog = Paragraph::new(dialog_lines)
+            .block(
+                Block::default()
+                    .borders(Borders::all())
+                    .title("Patterns (Enter select/add, Esc close)"),
+            );
+
+        f.render_widget(dialog, area);
+    }
+}
+
+fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(
+            [
+                Constraint::Percentage((100 - percent_y) / 2),
+                Constraint::Percentage(percent_y),
+                Constraint::Percentage((100 - percent_y) / 2),
+            ]
+            .as_ref(),
+        )
+        .split(r);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(
+            [
+                Constraint::Percentage((100 - percent_x) / 2),
+                Constraint::Percentage(percent_x),
+                Constraint::Percentage((100 - percent_x) / 2),
+            ]
+            .as_ref(),
+        )
+        .split(popup_layout[1])[1]
+}
+
+fn highlight_line<'a>(line: &'a str, regexes: &[Regex]) -> Line<'a> {
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
+    for regex in regexes {
+        for mat in regex.find_iter(line) {
+            let start = mat.start();
+            let end = mat.end();
+            if start < end {
+                ranges.push((start, end));
+            }
+        }
+    }
+
+    if ranges.is_empty() {
+        return Line::from(line.to_string().fg(Color::White));
+    }
+
+    ranges.sort_by_key(|(start, _)| *start);
+    let mut merged: Vec<(usize, usize)> = Vec::new();
+    for (start, end) in ranges {
+        if let Some((_, last_end)) = merged.last_mut() {
+            if start <= *last_end {
+                *last_end = (*last_end).max(end);
+                continue;
+            }
+        }
+        merged.push((start, end));
+    }
+
+    let mut spans = Vec::new();
+    let mut cursor = 0;
+    for (start, end) in merged {
+        if cursor < start {
+            spans.push(Span::styled(line[cursor..start].to_string(), Style::default()));
+        }
+        spans.push(Span::styled(
+            line[start..end].to_string(),
+            Style::default().fg(Color::Red),
+        ));
+        cursor = end;
+    }
+
+    if cursor < line.len() {
+        spans.push(Span::styled(line[cursor..].to_string(), Style::default()));
+    }
+
+    Line::from(spans)
 }
