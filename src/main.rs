@@ -367,6 +367,22 @@ fn ui(f: &mut Frame, lines: &[String], app: &AppState) {
 
     f.render_widget(table, chunks[0]);
 
+    if chunks[0].height > 0 {
+        let hint = "p: patterns  w: wrap";
+        let hint_width = hint.len() as u16;
+        let max_width = chunks[0].width.saturating_sub(2);
+        if hint_width <= max_width {
+            let area = Rect {
+                x: chunks[0].x + 1,
+                y: chunks[0].y + chunks[0].height.saturating_sub(1),
+                width: hint_width,
+                height: 1,
+            };
+            let hint_line = Paragraph::new(hint).style(Style::default().fg(Color::DarkGray));
+            f.render_widget(hint_line, area);
+        }
+    }
+
     if total_lines > 0 && start < max_start {
         let current_line = start.saturating_add(1);
         let percent = (current_line * 100) / total_lines;
