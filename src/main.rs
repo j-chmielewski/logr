@@ -1,7 +1,8 @@
 use clap::{ArgAction, Parser};
-use color_eyre::Result;
 use crossterm::{
-    event::{DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, poll, read},
+    event::{
+        DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers, read,
+    },
     execute,
     terminal::{
         Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
@@ -18,14 +19,12 @@ use ratatui::{
 };
 use regex::{Regex, RegexBuilder};
 use std::{
-    error::Error,
-    io,
-    sync::atomic::{AtomicBool, Ordering},
+    io::{self, Stdout},
     time::Duration,
 };
+use thiserror::Error;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
-    select, signal,
     time::timeout,
 };
 
@@ -39,66 +38,32 @@ struct Args {
     ignore_case: bool,
 }
 
-static SHOULD_EXIT: AtomicBool = AtomicBool::new(false);
-
-// async fn setup_signal_handlers() {
-//     tokio::spawn(async move {
-//         signal::ctrl_c().await.expect("Failed to listen for ctrl-c");
-//         SHOULD_EXIT.store(true, Ordering::SeqCst);
-//     });
-// }
-
-async fn check_exit() -> bool {
-    if SHOULD_EXIT.load(Ordering::SeqCst) {
-        return true;
-    }
-
-    if poll(Duration::from_millis(0)).unwrap_or(false) {
-        if let Ok(Event::Key(KeyEvent { code, .. })) = read() {
-            if code == KeyCode::Char('q') {
-                return true;
-            }
-        }
-    }
-
-    false
+#[derive(Error, Debug)]
+enum LogrError {
+    #[error(transparent)]
+    IoError(#[from] io::Error),
+    #[error(transparent)]
+    RegexError(#[from] regex::Error),
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
-    // setup_signal_handlers().await;
-    select! {
-        _ = signal::ctrl_c() => {},
-        _ = run() => {},
-    }
-
-    Ok(())
+async fn main() -> anyhow::Result<()> {
+    let args = Args::parse();
+    Ok(run(args).await?)
 }
 
-async fn run() -> Result<(), Box<dyn Error>> {
-    let args = Args::parse();
-
+async fn run(args: Args) -> Result<(), LogrError> {
     let re = RegexBuilder::new(&args.pattern)
         .case_insensitive(args.ignore_case)
-        .build()
-        .expect("Invalid regex pattern");
+        .build()?;
 
-    enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(
-        stdout,
-        EnterAlternateScreen,
-        Clear(ClearType::All),
-        EnableMouseCapture
-    )?;
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
+    let mut terminal = term_init()?;
     let stdin = BufReader::new(tokio::io::stdin());
-    let mut lines = Vec::new();
     let mut lines_stream = stdin.lines();
+    let mut lines = Vec::new();
 
     loop {
-        if check_exit().await {
+        if should_exit().await {
             break;
         }
 
@@ -110,15 +75,50 @@ async fn run() -> Result<(), Box<dyn Error>> {
         }
     }
 
+    term_deinit(terminal)?;
+
+    Ok(())
+}
+
+type LogrTerminal = Terminal<CrosstermBackend<Stdout>>;
+fn term_init() -> Result<LogrTerminal, io::Error> {
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    execute!(
+        stdout,
+        EnterAlternateScreen,
+        Clear(ClearType::All),
+        EnableMouseCapture
+    )?;
+    let backend = CrosstermBackend::new(stdout);
+    Terminal::new(backend)
+}
+
+fn term_deinit(mut terminal: LogrTerminal) -> Result<(), io::Error> {
     disable_raw_mode()?;
     execute!(
         terminal.backend_mut(),
         LeaveAlternateScreen,
         DisableMouseCapture
     )?;
-    terminal.show_cursor()?;
+    terminal.show_cursor()
+}
 
-    Ok(())
+async fn should_exit() -> bool {
+    if crossterm::event::poll(Duration::from_millis(0)).unwrap_or(false) {
+        if let Ok(Event::Key(KeyEvent {
+            code, modifiers, ..
+        })) = read()
+        {
+            if code == KeyCode::Char('q')
+                || (code == KeyCode::Char('c') && modifiers.contains(KeyModifiers::CONTROL))
+            {
+                return true;
+            }
+        }
+    }
+
+    false
 }
 
 fn ui(f: &mut Frame, lines: &Vec<String>, re: &Regex) {
