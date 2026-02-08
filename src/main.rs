@@ -54,6 +54,8 @@ struct AppState {
     pattern_error: Option<String>,
     regexes: Vec<Regex>,
     ignore_case: bool,
+    scroll: usize,
+    follow: bool,
 }
 
 const PATTERN_COLORS: [Color; 10] = [
@@ -71,6 +73,14 @@ const PATTERN_COLORS: [Color; 10] = [
 
 fn pattern_color(index: usize) -> Color {
     PATTERN_COLORS[index % PATTERN_COLORS.len()]
+}
+
+fn max_start(total_lines: usize, view_height: usize) -> usize {
+    if view_height == 0 {
+        0
+    } else {
+        total_lines.saturating_sub(view_height)
+    }
 }
 
 const TICK_RATE: Duration = Duration::from_millis(20);
@@ -94,6 +104,8 @@ async fn run(args: Args) -> Result<(), LogrError> {
         pattern_error: None,
         regexes,
         ignore_case: args.ignore_case,
+        scroll: 0,
+        follow: true,
     };
 
     let mut terminal = term_init()?;
@@ -102,7 +114,8 @@ async fn run(args: Args) -> Result<(), LogrError> {
     let mut lines = Vec::new();
 
     loop {
-        let event_result = handle_event(&mut app)?;
+        let view_height = terminal.size()?.height.saturating_sub(2) as usize;
+        let event_result = handle_event(&mut app, lines.len(), view_height)?;
         if event_result.exit {
             break;
         }
@@ -161,7 +174,11 @@ struct EventResult {
     redraw: bool,
 }
 
-fn handle_event(app: &mut AppState) -> Result<EventResult, LogrError> {
+fn handle_event(
+    app: &mut AppState,
+    total_lines: usize,
+    view_height: usize,
+) -> Result<EventResult, LogrError> {
     let mut redraw = false;
     while crossterm::event::poll(Duration::from_millis(0)).unwrap_or(false) {
         if let Ok(Event::Key(KeyEvent {
@@ -169,28 +186,13 @@ fn handle_event(app: &mut AppState) -> Result<EventResult, LogrError> {
         })) = read()
         {
             redraw = true;
-            if !app.dialog_open {
-                match code {
-                    KeyCode::Char('q') => return Ok(EventResult { exit: true, redraw }),
-                    KeyCode::Char('p') => {
-                        app.dialog_open = true;
-                        app.input.clear();
-                        app.pattern_error = None;
-                        app.selected = 0;
-                    }
-                    KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
-                        return Ok(EventResult { exit: true, redraw })
-                    }
-                    _ => {}
-                }
-            } else {
+            if app.dialog_open {
                 match code {
                     KeyCode::Esc => {
                         app.dialog_open = false;
                         app.input.clear();
                         app.pattern_error = None;
                     }
-                    KeyCode::Char('q') => return Ok(EventResult { exit: true, redraw }),
                     KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
                         return Ok(EventResult { exit: true, redraw })
                     }
@@ -248,6 +250,78 @@ fn handle_event(app: &mut AppState) -> Result<EventResult, LogrError> {
                     }
                     _ => {}
                 }
+                continue;
+            }
+
+            match code {
+                KeyCode::Char('q') => return Ok(EventResult { exit: true, redraw }),
+                KeyCode::Char('p') => {
+                    app.dialog_open = true;
+                    app.input.clear();
+                    app.pattern_error = None;
+                    app.selected = 0;
+                }
+                KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
+                    return Ok(EventResult { exit: true, redraw })
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    if total_lines > 0 {
+                        let max_start = max_start(total_lines, view_height);
+                        if app.follow {
+                            app.follow = false;
+                            app.scroll = max_start;
+                        }
+                        if app.scroll > 0 {
+                            app.scroll -= 1;
+                        }
+                    }
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    if total_lines > 0 {
+                        let max_start = max_start(total_lines, view_height);
+                        if app.follow {
+                            app.scroll = max_start;
+                        }
+                        if app.scroll < max_start {
+                            app.scroll += 1;
+                        } else {
+                            app.follow = true;
+                        }
+                    }
+                }
+                KeyCode::PageUp | KeyCode::Char('u') if modifiers.contains(KeyModifiers::CONTROL) => {
+                    if total_lines > 0 {
+                        let max_start = max_start(total_lines, view_height);
+                        let delta = usize::max(1, view_height / 2);
+                        if app.follow {
+                            app.follow = false;
+                            app.scroll = max_start;
+                        }
+                        app.scroll = app.scroll.saturating_sub(delta);
+                    }
+                }
+                KeyCode::PageDown | KeyCode::Char('d') if modifiers.contains(KeyModifiers::CONTROL) => {
+                    if total_lines > 0 {
+                        let max_start = max_start(total_lines, view_height);
+                        let delta = usize::max(1, view_height / 2);
+                        if app.follow {
+                            app.scroll = max_start;
+                        }
+                        app.scroll = usize::min(app.scroll + delta, max_start);
+                        if app.scroll == max_start {
+                            app.follow = true;
+                        }
+                    }
+                }
+                KeyCode::Home | KeyCode::Char('g') if !modifiers.contains(KeyModifiers::SHIFT) => {
+                    app.follow = false;
+                    app.scroll = 0;
+                }
+                KeyCode::End | KeyCode::Char('G') => {
+                    app.follow = true;
+                    app.scroll = max_start(total_lines, view_height);
+                }
+                _ => {}
             }
         }
     }
@@ -266,7 +340,12 @@ fn ui(f: &mut Frame, lines: &Vec<String>, app: &AppState) {
         .split(f.area());
 
     let content_height = chunks[0].height.saturating_sub(2) as usize;
-    let start = lines.len().saturating_sub(content_height);
+    let max_start = max_start(lines.len(), content_height);
+    let start = if app.follow {
+        max_start
+    } else {
+        app.scroll.min(max_start)
+    };
     let rows = lines[start..]
         .iter()
         .map(|line| highlight_line(line, &app.regexes));
@@ -311,7 +390,7 @@ fn ui(f: &mut Frame, lines: &Vec<String>, app: &AppState) {
             .block(
                 Block::default()
                     .borders(Borders::all())
-                    .title("Patterns (Enter select/add, Esc close)"),
+                    .title("Patterns (Enter: add, Del: delete, Esc: close)"),
             );
 
         f.render_widget(dialog, area);
