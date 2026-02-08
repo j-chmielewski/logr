@@ -48,6 +48,7 @@ enum LogrError {
 
 struct AppState {
     patterns: Vec<String>,
+    selected: usize,
     dialog_open: bool,
     input: String,
     pattern_error: Option<String>,
@@ -85,6 +86,7 @@ async fn run(args: Args) -> Result<(), LogrError> {
     }
     let mut app = AppState {
         patterns: args.patterns,
+        selected: 0,
         dialog_open: false,
         input: String::new(),
         pattern_error: None,
@@ -171,6 +173,7 @@ fn handle_event(app: &mut AppState) -> Result<EventResult, LogrError> {
                         app.dialog_open = true;
                         app.input.clear();
                         app.pattern_error = None;
+                        app.selected = 0;
                     }
                     KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
                         return Ok(EventResult { exit: true, redraw })
@@ -189,22 +192,46 @@ fn handle_event(app: &mut AppState) -> Result<EventResult, LogrError> {
                         return Ok(EventResult { exit: true, redraw })
                     }
                     KeyCode::Enter => {
-                        if app.input.trim().is_empty() {
+                        if app.selected == app.patterns.len() {
+                            if app.input.trim().is_empty() {
+                                app.dialog_open = false;
+                                app.pattern_error = None;
+                            } else {
+                                match build_regex(&app.input, app.ignore_case) {
+                                    Ok(regex) => {
+                                        app.patterns.push(app.input.clone());
+                                        app.regexes.push(regex);
+                                        app.dialog_open = false;
+                                        app.input.clear();
+                                        app.pattern_error = None;
+                                    }
+                                    Err(err) => {
+                                        app.pattern_error =
+                                            Some(format!("Invalid pattern: {err}"));
+                                    }
+                                }
+                            }
+                        } else {
                             app.dialog_open = false;
                             app.pattern_error = None;
-                        } else {
-                            match build_regex(&app.input, app.ignore_case) {
-                                Ok(regex) => {
-                                    app.patterns.push(app.input.clone());
-                                    app.regexes.push(regex);
-                                    app.dialog_open = false;
-                                    app.input.clear();
-                                    app.pattern_error = None;
-                                }
-                                Err(err) => {
-                                    app.pattern_error =
-                                        Some(format!("Invalid pattern: {err}"));
-                                }
+                        }
+                    }
+                    KeyCode::Up => {
+                        if app.selected > 0 {
+                            app.selected -= 1;
+                        }
+                    }
+                    KeyCode::Down => {
+                        if app.selected < app.patterns.len() {
+                            app.selected += 1;
+                        }
+                    }
+                    KeyCode::Delete => {
+                        if app.selected < app.patterns.len() {
+                            app.patterns.remove(app.selected);
+                            app.regexes.remove(app.selected);
+                            if app.selected > app.patterns.len() {
+                                app.selected = app.patterns.len();
                             }
                         }
                     }
@@ -254,8 +281,9 @@ fn ui(f: &mut Frame, lines: &Vec<String>, app: &AppState) {
         let mut dialog_lines = Vec::new();
 
         for (i, pattern) in app.patterns.iter().enumerate() {
+            let prefix = if app.selected == i { "> " } else { "  " };
             dialog_lines.push(Line::from(Span::styled(
-                format!("  {pattern}"),
+                format!("{prefix}{pattern}"),
                 Style::default().fg(pattern_color(i)),
             )));
         }
@@ -267,9 +295,13 @@ fn ui(f: &mut Frame, lines: &Vec<String>, app: &AppState) {
             )));
         }
 
-        let input_style = Style::default().fg(Color::Cyan);
+        let input_style = if app.selected == app.patterns.len() {
+            Style::default().fg(Color::Cyan)
+        } else {
+            Style::default().fg(Color::White)
+        };
         dialog_lines.push(Line::from(Span::styled(
-            format!("> + {}", app.input),
+            format!("{}+ {}", if app.selected == app.patterns.len() { "> " } else { "  " }, app.input),
             input_style,
         )));
 
