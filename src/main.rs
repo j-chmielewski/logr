@@ -25,7 +25,7 @@ use std::{
 };
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
-    signal,
+    select, signal,
     time::timeout,
 };
 
@@ -41,12 +41,12 @@ struct Args {
 
 static SHOULD_EXIT: AtomicBool = AtomicBool::new(false);
 
-async fn setup_signal_handlers() {
-    tokio::spawn(async move {
-        signal::ctrl_c().await.expect("Failed to listen for ctrl-c");
-        SHOULD_EXIT.store(true, Ordering::SeqCst);
-    });
-}
+// async fn setup_signal_handlers() {
+//     tokio::spawn(async move {
+//         signal::ctrl_c().await.expect("Failed to listen for ctrl-c");
+//         SHOULD_EXIT.store(true, Ordering::SeqCst);
+//     });
+// }
 
 async fn check_exit() -> bool {
     if SHOULD_EXIT.load(Ordering::SeqCst) {
@@ -66,9 +66,17 @@ async fn check_exit() -> bool {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let args = Args::parse();
+    // setup_signal_handlers().await;
+    select! {
+        _ = signal::ctrl_c() => {},
+        _ = run() => {},
+    }
 
-    setup_signal_handlers().await;
+    Ok(())
+}
+
+async fn run() -> Result<(), Box<dyn Error>> {
+    let args = Args::parse();
 
     let re = RegexBuilder::new(&args.pattern)
         .case_insensitive(args.ignore_case)
