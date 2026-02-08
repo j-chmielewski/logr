@@ -73,6 +73,8 @@ fn pattern_color(index: usize) -> Color {
     PATTERN_COLORS[index % PATTERN_COLORS.len()]
 }
 
+const TICK_RATE: Duration = Duration::from_millis(20);
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
@@ -107,7 +109,7 @@ async fn run(args: Args) -> Result<(), LogrError> {
 
         let mut should_draw = event_result.redraw || app.dialog_open;
         if let Ok(Ok(Some(line))) =
-            timeout(Duration::from_millis(100), lines_stream.next_line()).await
+            timeout(TICK_RATE, lines_stream.next_line()).await
         {
             lines.push(line);
             should_draw = true;
@@ -160,12 +162,13 @@ struct EventResult {
 }
 
 fn handle_event(app: &mut AppState) -> Result<EventResult, LogrError> {
-    if crossterm::event::poll(Duration::from_millis(0)).unwrap_or(false) {
+    let mut redraw = false;
+    while crossterm::event::poll(Duration::from_millis(0)).unwrap_or(false) {
         if let Ok(Event::Key(KeyEvent {
             code, modifiers, ..
         })) = read()
         {
-            let redraw = true;
+            redraw = true;
             if !app.dialog_open {
                 match code {
                     KeyCode::Char('q') => return Ok(EventResult { exit: true, redraw }),
@@ -246,17 +249,12 @@ fn handle_event(app: &mut AppState) -> Result<EventResult, LogrError> {
                     _ => {}
                 }
             }
-
-            return Ok(EventResult {
-                exit: false,
-                redraw,
-            });
         }
     }
 
     Ok(EventResult {
         exit: false,
-        redraw: false,
+        redraw,
     })
 }
 
