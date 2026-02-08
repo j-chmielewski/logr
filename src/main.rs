@@ -55,6 +55,23 @@ struct AppState {
     ignore_case: bool,
 }
 
+const PATTERN_COLORS: [Color; 10] = [
+    Color::Red,
+    Color::Green,
+    Color::Blue,
+    Color::Yellow,
+    Color::Magenta,
+    Color::Cyan,
+    Color::LightRed,
+    Color::LightGreen,
+    Color::LightYellow,
+    Color::LightBlue,
+];
+
+fn pattern_color(index: usize) -> Color {
+    PATTERN_COLORS[index % PATTERN_COLORS.len()]
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
@@ -223,9 +240,7 @@ fn ui(f: &mut Frame, lines: &Vec<String>, app: &AppState) {
         .constraints([Constraint::Percentage(100)])
         .split(f.area());
 
-    let rows = lines.iter().map(|line| {
-        highlight_line(line, &app.regexes)
-    });
+    let rows = lines.iter().map(|line| highlight_line(line, &app.regexes));
 
     let table = Paragraph::new(rows.collect::<Vec<_>>())
         .block(Block::default())
@@ -238,10 +253,10 @@ fn ui(f: &mut Frame, lines: &Vec<String>, app: &AppState) {
         f.render_widget(Clear, area);
         let mut dialog_lines = Vec::new();
 
-        for pattern in &app.patterns {
+        for (i, pattern) in app.patterns.iter().enumerate() {
             dialog_lines.push(Line::from(Span::styled(
                 format!("  {pattern}"),
-                Style::default().fg(Color::Green),
+                Style::default().fg(pattern_color(i)),
             )));
         }
 
@@ -296,13 +311,14 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 }
 
 fn highlight_line<'a>(line: &'a str, regexes: &[Regex]) -> Line<'a> {
-    let mut ranges: Vec<(usize, usize)> = Vec::new();
-    for regex in regexes {
+    let mut ranges: Vec<(usize, usize, usize, Color)> = Vec::new();
+    for (index, regex) in regexes.iter().enumerate() {
+        let color = pattern_color(index);
         for mat in regex.find_iter(line) {
             let start = mat.start();
             let end = mat.end();
             if start < end {
-                ranges.push((start, end));
+                ranges.push((start, end, index, color));
             }
         }
     }
@@ -311,27 +327,23 @@ fn highlight_line<'a>(line: &'a str, regexes: &[Regex]) -> Line<'a> {
         return Line::from(line.to_string().fg(Color::White));
     }
 
-    ranges.sort_by_key(|(start, _)| *start);
-    let mut merged: Vec<(usize, usize)> = Vec::new();
-    for (start, end) in ranges {
-        if let Some((_, last_end)) = merged.last_mut() {
-            if start <= *last_end {
-                *last_end = (*last_end).max(end);
-                continue;
-            }
-        }
-        merged.push((start, end));
-    }
-
+    ranges.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.2.cmp(&b.2)));
     let mut spans = Vec::new();
     let mut cursor = 0;
-    for (start, end) in merged {
+
+    for (mut start, end, _, color) in ranges {
+        if end <= cursor {
+            continue;
+        }
+        if start < cursor {
+            start = cursor;
+        }
         if cursor < start {
             spans.push(Span::styled(line[cursor..start].to_string(), Style::default()));
         }
         spans.push(Span::styled(
             line[start..end].to_string(),
-            Style::default().fg(Color::Red),
+            Style::default().fg(color),
         ));
         cursor = end;
     }
