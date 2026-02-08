@@ -62,7 +62,7 @@ impl AppState {
     #[must_use]
     pub fn new(patterns: Vec<String>, ignore_case: bool, regexes: Vec<Regex>) -> Self {
         Self {
-            patterns: patterns,
+            patterns,
             selected: 0,
             dialog_open: false,
             input: String::new(),
