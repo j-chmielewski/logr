@@ -192,23 +192,18 @@ fn handle_event(app: &mut AppState) -> Result<EventResult, LogrError> {
                         return Ok(EventResult { exit: true, redraw })
                     }
                     KeyCode::Enter => {
-                        if app.selected == app.patterns.len() {
-                            if app.input.trim().is_empty() {
-                                app.dialog_open = false;
-                                app.pattern_error = None;
-                            } else {
-                                match build_regex(&app.input, app.ignore_case) {
-                                    Ok(regex) => {
-                                        app.patterns.push(app.input.clone());
-                                        app.regexes.push(regex);
-                                        app.dialog_open = false;
-                                        app.input.clear();
-                                        app.pattern_error = None;
-                                    }
-                                    Err(err) => {
-                                        app.pattern_error =
-                                            Some(format!("Invalid pattern: {err}"));
-                                    }
+                        if !app.input.trim().is_empty() {
+                            match build_regex(&app.input, app.ignore_case) {
+                                Ok(regex) => {
+                                    app.patterns.push(app.input.clone());
+                                    app.regexes.push(regex);
+                                    app.dialog_open = false;
+                                    app.input.clear();
+                                    app.pattern_error = None;
+                                }
+                                Err(err) => {
+                                    app.pattern_error =
+                                        Some(format!("Invalid pattern: {err}"));
                                 }
                             }
                         } else {
@@ -233,14 +228,19 @@ fn handle_event(app: &mut AppState) -> Result<EventResult, LogrError> {
                             if app.selected > app.patterns.len() {
                                 app.selected = app.patterns.len();
                             }
+                            if app.patterns.is_empty() {
+                                app.selected = 0;
+                            }
                         }
                     }
                     KeyCode::Backspace => {
                         app.input.pop();
+                        app.selected = app.patterns.len();
                     }
                     KeyCode::Char(c) => {
                         if !modifiers.contains(KeyModifiers::CONTROL) {
                             app.input.push(c);
+                            app.selected = app.patterns.len();
                         }
                     }
                     _ => {}
