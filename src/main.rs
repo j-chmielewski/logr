@@ -15,7 +15,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style, Stylize},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 use regex::{Regex, RegexBuilder};
 use std::{
@@ -56,6 +56,7 @@ struct AppState {
     ignore_case: bool,
     scroll: usize,
     follow: bool,
+    wrap: bool,
 }
 
 const PATTERN_COLORS: [Color; 10] = [
@@ -106,6 +107,7 @@ async fn run(args: Args) -> Result<(), LogrError> {
         ignore_case: args.ignore_case,
         scroll: 0,
         follow: true,
+        wrap: false,
     };
 
     let mut terminal = term_init()?;
@@ -261,6 +263,9 @@ fn handle_event(
                     app.pattern_error = None;
                     app.selected = 0;
                 }
+                KeyCode::Char('w') => {
+                    app.wrap = !app.wrap;
+                }
                 KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
                     return Ok(EventResult { exit: true, redraw })
                 }
@@ -350,9 +355,13 @@ fn ui(f: &mut Frame, lines: &Vec<String>, app: &AppState) {
         .iter()
         .map(|line| highlight_line(line, &app.regexes));
 
-    let table = Paragraph::new(rows.collect::<Vec<_>>())
+    let mut table = Paragraph::new(rows.collect::<Vec<_>>())
         .block(Block::default())
         .block(Block::new().borders(Borders::all()));
+
+    if app.wrap {
+        table = table.wrap(Wrap { trim: false });
+    }
 
     f.render_widget(table, chunks[0]);
 
