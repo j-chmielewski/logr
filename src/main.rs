@@ -5,8 +5,8 @@ use crossterm::{
     },
     execute,
     terminal::{
-        Clear as TermClear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
-        enable_raw_mode,
+        Clear as TermClear, ClearType, EnterAlternateScreen, LeaveAlternateScreen,
+        disable_raw_mode, enable_raw_mode,
     },
 };
 use ratatui::{
@@ -123,9 +123,7 @@ async fn run(args: Args) -> Result<(), LogrError> {
         }
 
         let mut should_draw = event_result.redraw || app.dialog_open;
-        if let Ok(Ok(Some(line))) =
-            timeout(TICK_RATE, lines_stream.next_line()).await
-        {
+        if let Ok(Ok(Some(line))) = timeout(TICK_RATE, lines_stream.next_line()).await {
             lines.push(line);
             should_draw = true;
         }
@@ -196,7 +194,7 @@ fn handle_event(
                         app.pattern_error = None;
                     }
                     KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
-                        return Ok(EventResult { exit: true, redraw })
+                        return Ok(EventResult { exit: true, redraw });
                     }
                     KeyCode::Enter => {
                         if !app.input.trim().is_empty() {
@@ -209,8 +207,7 @@ fn handle_event(
                                     app.pattern_error = None;
                                 }
                                 Err(err) => {
-                                    app.pattern_error =
-                                        Some(format!("Invalid pattern: {err}"));
+                                    app.pattern_error = Some(format!("Invalid pattern: {err}"));
                                 }
                             }
                         } else {
@@ -267,7 +264,7 @@ fn handle_event(
                     app.wrap = !app.wrap;
                 }
                 KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
-                    return Ok(EventResult { exit: true, redraw })
+                    return Ok(EventResult { exit: true, redraw });
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
                     if total_lines > 0 {
@@ -294,7 +291,9 @@ fn handle_event(
                         }
                     }
                 }
-                KeyCode::PageUp | KeyCode::Char('u') if modifiers.contains(KeyModifiers::CONTROL) => {
+                KeyCode::PageUp | KeyCode::Char('u')
+                    if modifiers.contains(KeyModifiers::CONTROL) =>
+                {
                     if total_lines > 0 {
                         let max_start = max_start(total_lines, view_height);
                         let delta = usize::max(1, view_height / 2);
@@ -305,7 +304,9 @@ fn handle_event(
                         app.scroll = app.scroll.saturating_sub(delta);
                     }
                 }
-                KeyCode::PageDown | KeyCode::Char('d') if modifiers.contains(KeyModifiers::CONTROL) => {
+                KeyCode::PageDown | KeyCode::Char('d')
+                    if modifiers.contains(KeyModifiers::CONTROL) =>
+                {
                     if total_lines > 0 {
                         let max_start = max_start(total_lines, view_height);
                         let delta = usize::max(1, view_height / 2);
@@ -337,7 +338,7 @@ fn handle_event(
     })
 }
 
-fn ui(f: &mut Frame, lines: &Vec<String>, app: &AppState) {
+fn ui(f: &mut Frame, lines: &[String], app: &AppState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(0)
@@ -345,7 +346,8 @@ fn ui(f: &mut Frame, lines: &Vec<String>, app: &AppState) {
         .split(f.area());
 
     let content_height = chunks[0].height.saturating_sub(2) as usize;
-    let max_start = max_start(lines.len(), content_height);
+    let total_lines = lines.len();
+    let max_start = max_start(total_lines, content_height);
     let start = if app.follow {
         max_start
     } else {
@@ -364,6 +366,26 @@ fn ui(f: &mut Frame, lines: &Vec<String>, app: &AppState) {
     }
 
     f.render_widget(table, chunks[0]);
+
+    if total_lines > 0 && start < max_start {
+        let current_line = start.saturating_add(1);
+        let percent = (current_line * 100) / total_lines;
+        let status = format!("[{current_line}/{total_lines} ({percent}%)]");
+        let width = status.len() as u16;
+        let max_width = chunks[0].width.saturating_sub(2);
+        if width <= max_width && chunks[0].height > 0 {
+            let x = chunks[0].x + chunks[0].width.saturating_sub(width + 1);
+            let y = chunks[0].y + chunks[0].height.saturating_sub(1);
+            let area = Rect {
+                x,
+                y,
+                width,
+                height: 1,
+            };
+            let status_line = Paragraph::new(status).style(Style::default().fg(Color::Yellow));
+            f.render_widget(status_line, area);
+        }
+    }
 
     if app.dialog_open {
         let area = centered_rect(80, 60, f.area());
@@ -391,16 +413,23 @@ fn ui(f: &mut Frame, lines: &Vec<String>, app: &AppState) {
             Style::default().fg(Color::White)
         };
         dialog_lines.push(Line::from(Span::styled(
-            format!("{}+ {}", if app.selected == app.patterns.len() { "> " } else { "  " }, app.input),
+            format!(
+                "{}+ {}",
+                if app.selected == app.patterns.len() {
+                    "> "
+                } else {
+                    "  "
+                },
+                app.input
+            ),
             input_style,
         )));
 
-        let dialog = Paragraph::new(dialog_lines)
-            .block(
-                Block::default()
-                    .borders(Borders::all())
-                    .title("Patterns (Enter: add, Del: delete, Esc: close)"),
-            );
+        let dialog = Paragraph::new(dialog_lines).block(
+            Block::default()
+                .borders(Borders::all())
+                .title("Patterns (Enter: add, Del: delete, Esc: close)"),
+        );
 
         f.render_widget(dialog, area);
     }
@@ -461,7 +490,10 @@ fn highlight_line<'a>(line: &'a str, regexes: &[Regex]) -> Line<'a> {
             start = cursor;
         }
         if cursor < start {
-            spans.push(Span::styled(line[cursor..start].to_string(), Style::default()));
+            spans.push(Span::styled(
+                line[cursor..start].to_string(),
+                Style::default(),
+            ));
         }
         spans.push(Span::styled(
             line[start..end].to_string(),
