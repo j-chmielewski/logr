@@ -267,7 +267,11 @@ fn ui(f: &mut Frame, lines: &Vec<String>, app: &AppState) {
         .constraints([Constraint::Percentage(100)])
         .split(f.area());
 
-    let rows = lines.iter().map(|line| highlight_line(line, &app.regexes));
+    let content_height = chunks[0].height.saturating_sub(2) as usize;
+    let start = lines.len().saturating_sub(content_height);
+    let rows = lines[start..]
+        .iter()
+        .map(|line| highlight_line(line, &app.regexes));
 
     let table = Paragraph::new(rows.collect::<Vec<_>>())
         .block(Block::default())
