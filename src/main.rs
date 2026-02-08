@@ -31,8 +31,8 @@ use tokio::{
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    #[arg(short, long)]
-    pattern: String,
+    #[arg(short, long, num_args = 1.., value_delimiter = ',')]
+    patterns: Vec<String>,
 
     #[arg(short, long, action = ArgAction::SetTrue)]
     ignore_case: bool,
@@ -62,13 +62,16 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn run(args: Args) -> Result<(), LogrError> {
-    let regex = build_regex(&args.pattern, args.ignore_case)?;
+    let mut regexes = Vec::new();
+    for pattern in &args.patterns {
+        regexes.push(build_regex(pattern, args.ignore_case)?);
+    }
     let mut app = AppState {
-        patterns: vec![args.pattern],
+        patterns: args.patterns,
         dialog_open: false,
         input: String::new(),
         pattern_error: None,
-        regexes: vec![regex],
+        regexes,
         ignore_case: args.ignore_case,
     };
 
@@ -102,6 +105,7 @@ async fn run(args: Args) -> Result<(), LogrError> {
 }
 
 type LogrTerminal = Terminal<CrosstermBackend<Stdout>>;
+
 fn term_init() -> Result<LogrTerminal, io::Error> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
