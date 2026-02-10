@@ -46,7 +46,7 @@ pub enum LogrError {
     RegexError(#[from] regex::Error),
 }
 
-pub(crate) struct PatternSpec {
+pub struct PatternSpec {
     pattern: String,
     case_sensitive: bool,
     regex: Regex,
