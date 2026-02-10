@@ -1,13 +1,14 @@
+use ansi_to_tui::IntoText as _;
 use ratatui::{
-    Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Style, Stylize},
+    style::{Color, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
+    Frame,
 };
 use regex::Regex;
 
-use crate::{AppState, max_start};
+use crate::{max_start, AppState};
 
 const PATTERN_COLORS: [Color; 10] = [
     Color::Red,
@@ -165,11 +166,14 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
         .split(popup_layout[1])[1]
 }
 
-fn highlight_line<'a>(line: &'a str, regexes: &[Regex]) -> Line<'a> {
+fn highlight_line(line: &str, regexes: &[Regex]) -> Line<'static> {
+    let base_line = parse_ansi_line(line);
+    let plain = line_plain_text(&base_line);
+
     let mut ranges: Vec<(usize, usize, usize, Color)> = Vec::new();
     for (index, regex) in regexes.iter().enumerate() {
         let color = pattern_color(index);
-        for mat in regex.find_iter(line) {
+        for mat in regex.find_iter(&plain) {
             let start = mat.start();
             let end = mat.end();
             if start < end {
@@ -179,12 +183,13 @@ fn highlight_line<'a>(line: &'a str, regexes: &[Regex]) -> Line<'a> {
     }
 
     if ranges.is_empty() {
-        return Line::from(line.to_string().fg(Color::White));
+        return base_line;
     }
 
     ranges.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.2.cmp(&b.2)));
     let mut spans = Vec::new();
     let mut cursor = 0;
+    let text_len = plain.len();
 
     for (mut start, end, _, color) in ranges {
         if end <= cursor {
@@ -194,21 +199,71 @@ fn highlight_line<'a>(line: &'a str, regexes: &[Regex]) -> Line<'a> {
             start = cursor;
         }
         if cursor < start {
-            spans.push(Span::styled(
-                line[cursor..start].to_string(),
-                Style::default(),
-            ));
+            spans.extend(slice_line_spans(&base_line, cursor, start));
         }
-        spans.push(Span::styled(
-            line[start..end].to_string(),
-            Style::default().fg(color),
-        ));
+        for mut span in slice_line_spans(&base_line, start, end) {
+            span.style = span.style.fg(color);
+            spans.push(span);
+        }
         cursor = end;
     }
 
-    if cursor < line.len() {
-        spans.push(Span::styled(line[cursor..].to_string(), Style::default()));
+    if cursor < text_len {
+        spans.extend(slice_line_spans(&base_line, cursor, text_len));
     }
 
-    Line::from(spans)
+    Line {
+        style: base_line.style,
+        alignment: base_line.alignment,
+        spans,
+    }
+}
+
+fn parse_ansi_line(line: &str) -> Line<'static> {
+    match line.into_text() {
+        Ok(text) => text.lines.into_iter().next().unwrap_or_default(),
+        Err(_) => Line::from(line.to_string()),
+    }
+}
+
+fn line_plain_text(line: &Line<'_>) -> String {
+    let mut out = String::new();
+    for span in &line.spans {
+        out.push_str(&span.content);
+    }
+    out
+}
+
+fn slice_line_spans(line: &Line<'_>, start: usize, end: usize) -> Vec<Span<'static>> {
+    if start >= end {
+        return Vec::new();
+    }
+
+    let mut spans = Vec::new();
+    let mut offset = 0;
+    for span in &line.spans {
+        let len = span.content.len();
+        let span_start = offset;
+        let span_end = offset + len;
+        if span_end <= start {
+            offset += len;
+            continue;
+        }
+        if span_start >= end {
+            break;
+        }
+
+        let slice_start = start.saturating_sub(span_start);
+        let slice_end = (end - span_start).min(len);
+        if slice_start < slice_end {
+            spans.push(Span::styled(
+                span.content[slice_start..slice_end].to_string(),
+                span.style,
+            ));
+        }
+
+        offset += len;
+    }
+
+    spans
 }
