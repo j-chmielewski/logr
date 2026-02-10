@@ -1,3 +1,4 @@
+use crate::{max_start, AppState, PatternSpec};
 use ansi_to_tui::IntoText as _;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -6,9 +7,6 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
     Frame,
 };
-use regex::Regex;
-
-use crate::{max_start, AppState};
 
 const PATTERN_COLORS: [Color; 10] = [
     Color::Red,
@@ -44,7 +42,7 @@ pub(crate) fn ui(f: &mut Frame, lines: &[String], app: &AppState) {
     };
     let rows = lines[start..]
         .iter()
-        .map(|line| highlight_line(line, &app.regexes));
+        .map(|line| highlight_line(line, &app.patterns));
 
     let mut table = Paragraph::new(rows.collect::<Vec<_>>())
         .block(Block::default())
@@ -99,8 +97,9 @@ pub(crate) fn ui(f: &mut Frame, lines: &[String], app: &AppState) {
 
         for (i, pattern) in app.patterns.iter().enumerate() {
             let prefix = if app.selected == i { "> " } else { "  " };
+            let checkbox = if pattern.case_sensitive { "[x]" } else { "[ ]" };
             dialog_lines.push(Line::from(Span::styled(
-                format!("{prefix}{pattern}"),
+                format!("{prefix}{checkbox} {}", pattern.pattern),
                 Style::default().fg(pattern_color(i)),
             )));
         }
@@ -133,7 +132,7 @@ pub(crate) fn ui(f: &mut Frame, lines: &[String], app: &AppState) {
         let dialog = Paragraph::new(dialog_lines).block(
             Block::default()
                 .borders(Borders::all())
-                .title("Patterns (Enter: add, Del: delete, Esc: close)"),
+                .title("Patterns (Enter: add, Del: delete, Left/Right: case, Esc: close)"),
         );
 
         f.render_widget(dialog, area);
@@ -166,14 +165,14 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
         .split(popup_layout[1])[1]
 }
 
-fn highlight_line(line: &str, regexes: &[Regex]) -> Line<'static> {
+fn highlight_line(line: &str, patterns: &[PatternSpec]) -> Line<'static> {
     let base_line = parse_ansi_line(line);
     let plain = line_plain_text(&base_line);
 
     let mut ranges: Vec<(usize, usize, usize, Color)> = Vec::new();
-    for (index, regex) in regexes.iter().enumerate() {
+    for (index, pattern) in patterns.iter().enumerate() {
         let color = pattern_color(index);
-        for mat in regex.find_iter(&plain) {
+        for mat in pattern.regex.find_iter(&plain) {
             let start = mat.start();
             let end = mat.end();
             if start < end {

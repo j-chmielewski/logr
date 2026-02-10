@@ -45,13 +45,18 @@ pub enum LogrError {
     RegexError(#[from] regex::Error),
 }
 
+pub(crate) struct PatternSpec {
+    pattern: String,
+    case_sensitive: bool,
+    regex: Regex,
+}
+
 struct AppState {
-    patterns: Vec<String>,
+    patterns: Vec<PatternSpec>,
     selected: usize,
     dialog_open: bool,
     input: String,
     pattern_error: Option<String>,
-    regexes: Vec<Regex>,
     ignore_case: bool,
     scroll: usize,
     follow: bool,
@@ -60,14 +65,13 @@ struct AppState {
 
 impl AppState {
     #[must_use]
-    pub fn new(patterns: Vec<String>, ignore_case: bool, regexes: Vec<Regex>) -> Self {
+    pub fn new(patterns: Vec<PatternSpec>, ignore_case: bool) -> Self {
         Self {
             patterns,
             selected: 0,
             dialog_open: false,
             input: String::new(),
             pattern_error: None,
-            regexes,
             ignore_case,
             scroll: 0,
             follow: true,
@@ -77,11 +81,11 @@ impl AppState {
 }
 
 pub async fn run(args: Args) -> Result<(), LogrError> {
-    let mut regexes = Vec::new();
+    let mut patterns = Vec::new();
     for pattern in &args.patterns {
-        regexes.push(build_regex(pattern, args.ignore_case)?);
+        patterns.push(build_pattern(pattern.clone(), !args.ignore_case)?);
     }
-    let mut app = AppState::new(args.patterns, args.ignore_case, regexes);
+    let mut app = AppState::new(patterns, args.ignore_case);
 
     let mut terminal = term_init()?;
     let stdin = BufReader::new(tokio::io::stdin());
@@ -136,10 +140,19 @@ fn term_cleanup(mut terminal: LogrTerminal) -> Result<(), io::Error> {
     terminal.show_cursor()
 }
 
-fn build_regex(pattern: &str, ignore_case: bool) -> Result<Regex, regex::Error> {
+fn build_regex(pattern: &str, case_sensitive: bool) -> Result<Regex, regex::Error> {
     RegexBuilder::new(pattern)
-        .case_insensitive(ignore_case)
+        .case_insensitive(!case_sensitive)
         .build()
+}
+
+fn build_pattern(pattern: String, case_sensitive: bool) -> Result<PatternSpec, LogrError> {
+    let regex = build_regex(&pattern, case_sensitive)?;
+    Ok(PatternSpec {
+        pattern,
+        case_sensitive,
+        regex,
+    })
 }
 
 struct EventResult {
@@ -171,10 +184,9 @@ fn handle_event(
                     }
                     KeyCode::Enter => {
                         if !app.input.trim().is_empty() {
-                            match build_regex(&app.input, app.ignore_case) {
-                                Ok(regex) => {
-                                    app.patterns.push(app.input.clone());
-                                    app.regexes.push(regex);
+                            match build_pattern(app.input.clone(), !app.ignore_case) {
+                                Ok(pattern) => {
+                                    app.patterns.push(pattern);
                                     app.dialog_open = false;
                                     app.input.clear();
                                     app.pattern_error = None;
@@ -198,10 +210,28 @@ fn handle_event(
                             app.selected += 1;
                         }
                     }
+                    KeyCode::Left | KeyCode::Right => {
+                        if app.selected < app.patterns.len() {
+                            let case_sensitive =
+                                !app.patterns[app.selected].case_sensitive;
+                            match build_regex(
+                                &app.patterns[app.selected].pattern,
+                                case_sensitive,
+                            ) {
+                                Ok(regex) => {
+                                    app.patterns[app.selected].case_sensitive = case_sensitive;
+                                    app.patterns[app.selected].regex = regex;
+                                }
+                                Err(err) => {
+                                    app.pattern_error =
+                                        Some(format!("Invalid pattern: {err}"));
+                                }
+                            }
+                        }
+                    }
                     KeyCode::Delete => {
                         if app.selected < app.patterns.len() {
                             app.patterns.remove(app.selected);
-                            app.regexes.remove(app.selected);
                             if app.selected > app.patterns.len() {
                                 app.selected = app.patterns.len();
                             }
