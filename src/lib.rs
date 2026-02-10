@@ -1,7 +1,7 @@
 use clap::{ArgAction, Parser};
 use crossterm::{
     event::{
-        DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers, read,
+        DisableMouseCapture, EnableMouseCapture
     },
     execute,
     terminal::{
@@ -21,8 +21,9 @@ use tokio::{
     time::timeout,
 };
 
-use crate::ui::ui;
+use crate::{event::handle_event, ui::ui};
 
+mod event;
 mod ui;
 
 const TICK_RATE: Duration = Duration::from_millis(20);
@@ -152,192 +153,6 @@ fn build_pattern(pattern: String, case_sensitive: bool) -> Result<PatternSpec, L
         pattern,
         case_sensitive,
         regex,
-    })
-}
-
-struct EventResult {
-    exit: bool,
-    redraw: bool,
-}
-
-fn handle_event(
-    app: &mut AppState,
-    total_lines: usize,
-    view_height: usize,
-) -> Result<EventResult, LogrError> {
-    let mut redraw = false;
-    while crossterm::event::poll(Duration::from_millis(0)).unwrap_or(false) {
-        if let Ok(Event::Key(KeyEvent {
-            code, modifiers, ..
-        })) = read()
-        {
-            redraw = true;
-            if app.dialog_open {
-                match code {
-                    KeyCode::Esc => {
-                        app.dialog_open = false;
-                        app.input.clear();
-                        app.pattern_error = None;
-                    }
-                    KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
-                        return Ok(EventResult { exit: true, redraw });
-                    }
-                    KeyCode::Enter => {
-                        if !app.input.trim().is_empty() {
-                            match build_pattern(app.input.clone(), !app.ignore_case) {
-                                Ok(pattern) => {
-                                    app.patterns.push(pattern);
-                                    app.dialog_open = false;
-                                    app.input.clear();
-                                    app.pattern_error = None;
-                                }
-                                Err(err) => {
-                                    app.pattern_error = Some(format!("Invalid pattern: {err}"));
-                                }
-                            }
-                        } else {
-                            app.dialog_open = false;
-                            app.pattern_error = None;
-                        }
-                    }
-                    KeyCode::Up => {
-                        if app.selected > 0 {
-                            app.selected -= 1;
-                        }
-                    }
-                    KeyCode::Down => {
-                        if app.selected < app.patterns.len() {
-                            app.selected += 1;
-                        }
-                    }
-                    KeyCode::Left | KeyCode::Right => {
-                        if app.selected < app.patterns.len() {
-                            let case_sensitive =
-                                !app.patterns[app.selected].case_sensitive;
-                            match build_regex(
-                                &app.patterns[app.selected].pattern,
-                                case_sensitive,
-                            ) {
-                                Ok(regex) => {
-                                    app.patterns[app.selected].case_sensitive = case_sensitive;
-                                    app.patterns[app.selected].regex = regex;
-                                }
-                                Err(err) => {
-                                    app.pattern_error =
-                                        Some(format!("Invalid pattern: {err}"));
-                                }
-                            }
-                        }
-                    }
-                    KeyCode::Delete => {
-                        if app.selected < app.patterns.len() {
-                            app.patterns.remove(app.selected);
-                            if app.selected > app.patterns.len() {
-                                app.selected = app.patterns.len();
-                            }
-                            if app.patterns.is_empty() {
-                                app.selected = 0;
-                            }
-                        }
-                    }
-                    KeyCode::Backspace => {
-                        app.input.pop();
-                        app.selected = app.patterns.len();
-                    }
-                    KeyCode::Char(c) => {
-                        if !modifiers.contains(KeyModifiers::CONTROL) {
-                            app.input.push(c);
-                            app.selected = app.patterns.len();
-                        }
-                    }
-                    _ => {}
-                }
-                continue;
-            }
-
-            match code {
-                KeyCode::Char('q') => return Ok(EventResult { exit: true, redraw }),
-                KeyCode::Char('p') => {
-                    app.dialog_open = true;
-                    app.input.clear();
-                    app.pattern_error = None;
-                    app.selected = 0;
-                }
-                KeyCode::Char('w') => {
-                    app.wrap = !app.wrap;
-                }
-                KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
-                    return Ok(EventResult { exit: true, redraw });
-                }
-                KeyCode::Up | KeyCode::Char('k') => {
-                    if total_lines > 0 {
-                        let max_start = max_start(total_lines, view_height);
-                        if app.follow {
-                            app.follow = false;
-                            app.scroll = max_start;
-                        }
-                        if app.scroll > 0 {
-                            app.scroll -= 1;
-                        }
-                    }
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    if total_lines > 0 {
-                        let max_start = max_start(total_lines, view_height);
-                        if app.follow {
-                            app.scroll = max_start;
-                        }
-                        if app.scroll < max_start {
-                            app.scroll += 1;
-                        } else {
-                            app.follow = true;
-                        }
-                    }
-                }
-                KeyCode::PageUp | KeyCode::Char('u')
-                    if modifiers.contains(KeyModifiers::CONTROL) =>
-                {
-                    if total_lines > 0 {
-                        let max_start = max_start(total_lines, view_height);
-                        let delta = usize::max(1, view_height / 2);
-                        if app.follow {
-                            app.follow = false;
-                            app.scroll = max_start;
-                        }
-                        app.scroll = app.scroll.saturating_sub(delta);
-                    }
-                }
-                KeyCode::PageDown | KeyCode::Char('d')
-                    if modifiers.contains(KeyModifiers::CONTROL) =>
-                {
-                    if total_lines > 0 {
-                        let max_start = max_start(total_lines, view_height);
-                        let delta = usize::max(1, view_height / 2);
-                        if app.follow {
-                            app.scroll = max_start;
-                        }
-                        app.scroll = usize::min(app.scroll + delta, max_start);
-                        if app.scroll == max_start {
-                            app.follow = true;
-                        }
-                    }
-                }
-                KeyCode::Home | KeyCode::Char('g') if !modifiers.contains(KeyModifiers::SHIFT) => {
-                    app.follow = false;
-                    app.scroll = 0;
-                }
-                KeyCode::End | KeyCode::Char('G') => {
-                    app.follow = true;
-                    app.scroll = max_start(total_lines, view_height);
-                }
-                _ => {}
-            }
-        }
-    }
-
-    Ok(EventResult {
-        exit: false,
-        redraw,
     })
 }
 

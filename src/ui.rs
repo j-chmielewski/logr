@@ -1,11 +1,11 @@
-use crate::{max_start, AppState, PatternSpec};
+use crate::{AppState, PatternSpec, max_start};
 use ansi_to_tui::IntoText as _;
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
-    Frame,
 };
 
 const PATTERN_COLORS: [Color; 10] = [
