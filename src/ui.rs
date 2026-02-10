@@ -55,7 +55,7 @@ pub(crate) fn ui(f: &mut Frame, lines: &[String], app: &AppState) {
     f.render_widget(table, chunks[0]);
 
     if chunks[0].height > 0 {
-        let hint = "p: patterns  w: wrap  q: quit";
+    let hint = "p: patterns | w: wrap | j/k: scroll down/up | ctrl-d/ctrl-u: page down/up | q: quit";
         let hint_width = hint.len() as u16;
         let max_width = chunks[0].width.saturating_sub(2);
         if hint_width <= max_width {
