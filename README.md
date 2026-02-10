@@ -2,7 +2,7 @@
 
 TUI log viewer that highlights multiple regex patterns in streaming logs and lets you manage filters at runtime.
 
-https://asciinema.org/a/AdNygDJVw4N6TsMU
+[![asciinema demo](https://asciinema.org/a/AdNygDJVw4N6TsMU.svg)](https://asciinema.org/a/AdNygDJVw4N6TsMU)
 
 ## Features
 
