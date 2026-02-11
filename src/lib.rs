@@ -163,3 +163,37 @@ fn max_start(total_lines: usize, view_height: usize) -> usize {
         total_lines.saturating_sub(view_height)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{build_pattern, build_regex, max_start};
+
+    #[test]
+    fn build_regex_respects_case_sensitivity() {
+        let sensitive = build_regex("foo", true).expect("regex build failed");
+        let insensitive = build_regex("foo", false).expect("regex build failed");
+
+        assert!(sensitive.is_match("foo"));
+        assert!(!sensitive.is_match("FOO"));
+        assert!(insensitive.is_match("FOO"));
+    }
+
+    #[test]
+    fn build_pattern_sets_fields() {
+        let pattern = build_pattern("bar".to_string(), true).expect("pattern build failed");
+        assert_eq!(pattern.pattern, "bar");
+        assert!(pattern.case_sensitive);
+        assert!(pattern.regex.is_match("bar"));
+        assert!(!pattern.regex.is_match("BAR"));
+    }
+
+    #[test]
+    fn max_start_handles_empty_and_small_windows() {
+        assert_eq!(max_start(0, 10), 0);
+        assert_eq!(max_start(5, 10), 0);
+        assert_eq!(max_start(10, 10), 0);
+        assert_eq!(max_start(11, 10), 1);
+        assert_eq!(max_start(100, 10), 90);
+        assert_eq!(max_start(100, 0), 0);
+    }
+}

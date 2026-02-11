@@ -210,3 +210,180 @@ fn handle_main_event(
 
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{handle_dialog_event, handle_main_event};
+    use crate::{build_pattern, max_start, AppState};
+    use crossterm::event::{KeyCode, KeyModifiers};
+
+    fn app_with_patterns(ignore_case: bool) -> AppState {
+        let patterns = vec![
+            build_pattern("foo".to_string(), true).expect("pattern build failed"),
+            build_pattern("bar".to_string(), true).expect("pattern build failed"),
+        ];
+        AppState::new(patterns, ignore_case)
+    }
+
+    #[test]
+    fn dialog_enter_adds_pattern_and_closes() {
+        let mut app = app_with_patterns(false);
+        app.dialog_open = true;
+        app.input = "new".to_string();
+
+        let result = handle_dialog_event(&mut app, KeyCode::Enter, KeyModifiers::empty(), true)
+            .expect("dialog handler failed");
+
+        assert!(result.is_none());
+        assert!(!app.dialog_open);
+        assert!(app.input.is_empty());
+        assert!(app.pattern_error.is_none());
+        assert_eq!(app.patterns.len(), 3);
+        assert_eq!(app.patterns[2].pattern, "new");
+        assert!(app.patterns[2].case_sensitive);
+    }
+
+    #[test]
+    fn dialog_toggle_case_sensitive() {
+        let mut app = app_with_patterns(false);
+        app.dialog_open = true;
+        app.selected = 0;
+
+        let result = handle_dialog_event(&mut app, KeyCode::Left, KeyModifiers::empty(), true)
+            .expect("dialog handler failed");
+
+        assert!(result.is_none());
+        assert!(!app.patterns[0].case_sensitive);
+        assert!(app.patterns[0].regex.is_match("FOO"));
+    }
+
+    #[test]
+    fn dialog_delete_removes_pattern() {
+        let mut app = app_with_patterns(false);
+        app.dialog_open = true;
+        app.selected = 0;
+
+        let result = handle_dialog_event(&mut app, KeyCode::Delete, KeyModifiers::empty(), true)
+            .expect("dialog handler failed");
+
+        assert!(result.is_none());
+        assert_eq!(app.patterns.len(), 1);
+        assert_eq!(app.patterns[0].pattern, "bar");
+        assert_eq!(app.selected, 0);
+    }
+
+    #[test]
+    fn dialog_backspace_moves_selection_to_input() {
+        let mut app = app_with_patterns(false);
+        app.dialog_open = true;
+        app.selected = 0;
+        app.input = "ab".to_string();
+
+        let result = handle_dialog_event(&mut app, KeyCode::Backspace, KeyModifiers::empty(), true)
+            .expect("dialog handler failed");
+
+        assert!(result.is_none());
+        assert_eq!(app.input, "a");
+        assert_eq!(app.selected, app.patterns.len());
+    }
+
+    #[test]
+    fn main_open_dialog_resets_state() {
+        let mut app = app_with_patterns(false);
+        app.dialog_open = false;
+        app.input = "x".to_string();
+        app.pattern_error = Some("err".to_string());
+
+        let result = handle_main_event(
+            &mut app,
+            0,
+            0,
+            KeyCode::Char('p'),
+            KeyModifiers::empty(),
+            true,
+        );
+
+        assert!(result.is_none());
+        assert!(app.dialog_open);
+        assert_eq!(app.selected, 0);
+        assert!(app.input.is_empty());
+        assert!(app.pattern_error.is_none());
+    }
+
+    #[test]
+    fn main_scroll_up_breaks_follow() {
+        let mut app = app_with_patterns(false);
+        let total_lines = 100;
+        let view_height = 10;
+        app.follow = true;
+        app.scroll = 0;
+
+        let result = handle_main_event(
+            &mut app,
+            total_lines,
+            view_height,
+            KeyCode::Up,
+            KeyModifiers::empty(),
+            true,
+        );
+
+        assert!(result.is_none());
+        assert!(!app.follow);
+        assert_eq!(
+            app.scroll,
+            max_start(total_lines, view_height).saturating_sub(1)
+        );
+    }
+
+    #[test]
+    fn main_scroll_down_to_follow() {
+        let mut app = app_with_patterns(false);
+        let total_lines = 100;
+        let view_height = 10;
+        let max_start = max_start(total_lines, view_height);
+        app.follow = false;
+        app.scroll = max_start;
+
+        let result = handle_main_event(
+            &mut app,
+            total_lines,
+            view_height,
+            KeyCode::Down,
+            KeyModifiers::empty(),
+            true,
+        );
+
+        assert!(result.is_none());
+        assert!(app.follow);
+        assert_eq!(app.scroll, max_start);
+    }
+
+    #[test]
+    fn main_home_end_positions() {
+        let mut app = app_with_patterns(false);
+        let total_lines = 40;
+        let view_height = 10;
+
+        let _ = handle_main_event(
+            &mut app,
+            total_lines,
+            view_height,
+            KeyCode::Home,
+            KeyModifiers::empty(),
+            true,
+        );
+        assert!(!app.follow);
+        assert_eq!(app.scroll, 0);
+
+        let _ = handle_main_event(
+            &mut app,
+            total_lines,
+            view_height,
+            KeyCode::End,
+            KeyModifiers::empty(),
+            true,
+        );
+        assert!(app.follow);
+        assert_eq!(app.scroll, max_start(total_lines, view_height));
+    }
+}
