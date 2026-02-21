@@ -27,6 +27,7 @@ mod event;
 mod ui;
 
 const TICK_RATE: Duration = Duration::from_millis(20);
+const DRAIN_TIMEOUT: Duration = Duration::from_millis(0);
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -106,6 +107,9 @@ pub async fn run(args: Args) -> Result<(), LogrError> {
         let mut should_draw = event_result.redraw || app.dialog_open;
         if let Ok(Ok(Some(line))) = timeout(TICK_RATE, lines_stream.next_line()).await {
             lines.push(line);
+            while let Ok(Ok(Some(line))) = timeout(DRAIN_TIMEOUT, lines_stream.next_line()).await {
+                lines.push(line);
+            }
             should_draw = true;
         }
 
