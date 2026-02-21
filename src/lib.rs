@@ -61,6 +61,7 @@ struct AppState {
     ignore_case: bool,
     scroll: usize,
     follow: bool,
+    filter_only: bool,
     wrap: bool,
 }
 
@@ -76,6 +77,7 @@ impl AppState {
             ignore_case,
             scroll: 0,
             follow: true,
+            filter_only: false,
             wrap: false,
         }
     }
@@ -94,8 +96,9 @@ pub async fn run(args: Args) -> Result<(), LogrError> {
     let mut lines = Vec::new();
 
     loop {
+        let total_lines = filtered_line_count(&lines, &app.patterns, app.filter_only);
         let view_height = terminal.size()?.height.saturating_sub(2) as usize;
-        let event_result = handle_event(&mut app, lines.len(), view_height)?;
+        let event_result = handle_event(&mut app, total_lines, view_height)?;
         if event_result.exit {
             break;
         }
@@ -164,9 +167,23 @@ fn max_start(total_lines: usize, view_height: usize) -> usize {
     }
 }
 
+pub(crate) fn line_matches_patterns(line: &str, patterns: &[PatternSpec]) -> bool {
+    patterns.iter().any(|pattern| pattern.regex.is_match(line))
+}
+
+fn filtered_line_count(lines: &[String], patterns: &[PatternSpec], filter_only: bool) -> usize {
+    if !filter_only {
+        return lines.len();
+    }
+    lines
+        .iter()
+        .filter(|line| line_matches_patterns(line, patterns))
+        .count()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{build_pattern, build_regex, max_start};
+    use super::{build_pattern, build_regex, line_matches_patterns, max_start};
 
     #[test]
     fn build_regex_respects_case_sensitivity() {
@@ -195,5 +212,12 @@ mod tests {
         assert_eq!(max_start(11, 10), 1);
         assert_eq!(max_start(100, 10), 90);
         assert_eq!(max_start(100, 0), 0);
+    }
+
+    #[test]
+    fn line_match_returns_true_for_matching_pattern() {
+        let patterns = vec![build_pattern("error".to_string(), true).expect("pattern build failed")];
+        assert!(line_matches_patterns("error happened", &patterns));
+        assert!(!line_matches_patterns("all good", &patterns));
     }
 }

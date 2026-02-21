@@ -1,11 +1,11 @@
-use crate::{AppState, PatternSpec, max_start};
+use crate::{line_matches_patterns, max_start, AppState, PatternSpec};
 use ansi_to_tui::IntoText as _;
 use ratatui::{
-    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
+    Frame,
 };
 
 const PATTERN_COLORS: [Color; 10] = [
@@ -32,15 +32,24 @@ pub(crate) fn ui(f: &mut Frame, lines: &[String], app: &AppState) {
         .constraints([Constraint::Percentage(100)])
         .split(f.area());
 
+    let filtered_lines: Vec<&String> = if app.filter_only {
+        lines
+            .iter()
+            .filter(|line| line_matches_patterns(line, &app.patterns))
+            .collect()
+    } else {
+        lines.iter().collect()
+    };
+
     let content_height = chunks[0].height.saturating_sub(2) as usize;
-    let total_lines = lines.len();
+    let total_lines = filtered_lines.len();
     let max_start = max_start(total_lines, content_height);
     let start = if app.follow {
         max_start
     } else {
         app.scroll.min(max_start)
     };
-    let rows = lines[start..]
+    let rows = filtered_lines[start..]
         .iter()
         .map(|line| highlight_line(line, &app.patterns));
 
@@ -55,7 +64,7 @@ pub(crate) fn ui(f: &mut Frame, lines: &[String], app: &AppState) {
     f.render_widget(table, chunks[0]);
 
     if chunks[0].height > 0 {
-    let hint = "p: patterns | w: wrap | j/k: scroll down/up | ctrl-d/ctrl-u: page down/up | q: quit";
+        let hint = "p: patterns | w: wrap | f: filter | j/k: scroll down/up | ctrl-d/ctrl-u: page down/up | q: quit";
         let hint_width = hint.len() as u16;
         let max_width = chunks[0].width.saturating_sub(2);
         if hint_width <= max_width {

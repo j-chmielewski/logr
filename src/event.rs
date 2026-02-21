@@ -145,6 +145,11 @@ fn handle_main_event(
         KeyCode::Char('w') => {
             app.wrap = !app.wrap;
         }
+        KeyCode::Char('f') => {
+            app.filter_only = !app.filter_only;
+            app.follow = true;
+            app.scroll = 0;
+        }
         KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
             return Some(EventResult { exit: true, redraw });
         }
@@ -385,5 +390,27 @@ mod tests {
         );
         assert!(app.follow);
         assert_eq!(app.scroll, max_start(total_lines, view_height));
+    }
+
+    #[test]
+    fn main_toggle_filter_mode() {
+        let mut app = app_with_patterns(false);
+        app.filter_only = false;
+        app.follow = false;
+        app.scroll = 5;
+
+        let result = handle_main_event(
+            &mut app,
+            20,
+            10,
+            KeyCode::Char('f'),
+            KeyModifiers::empty(),
+            true,
+        );
+
+        assert!(result.is_none());
+        assert!(app.filter_only);
+        assert!(app.follow);
+        assert_eq!(app.scroll, 0);
     }
 }
