@@ -1,15 +1,15 @@
-# logr
+# Logr
 
-TUI log viewer that highlights multiple regex patterns in streaming logs and lets you manage filters at runtime.
+TUI log viewer that with filtering and regex highlighting.
 
-[![asciinema demo](https://asciinema.org/a/AdNygDJVw4N6TsMU.svg)](https://asciinema.org/a/AdNygDJVw4N6TsMU)
+![preview](res/logr.png)
 
 ## Features
 
 - Highlight multiple regex patterns with distinct colors
-- Toggle per-pattern case sensitivity in the dialog
+- Toggle per-pattern case sensitivity
 - Add or delete patterns at runtime
-- Scroll with tail-follow mode
+- Toggle filter mode to show only matching lines
 - Optional line wrapping
 
 ## Usage
